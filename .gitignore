@@ -1,0 +1,13 @@
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
+.env
+.terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+backend.dev.hcl
+crash.log

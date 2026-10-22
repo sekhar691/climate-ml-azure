@@ -1,0 +1,7 @@
+ContainerAppConsoleLogs_CL
+| where TimeGenerated > ago(24h)
+| extend p = parse_json(Log_s)
+| where tostring(p.event) == "prediction"
+| extend Probability = todouble(p.probability), LatencyMs = todouble(p.latency_ms)
+| summarize Predictions=count(), AvgProbability=avg(Probability), P95LatencyMs=percentile(LatencyMs,95) by bin(TimeGenerated,1h)
+| order by TimeGenerated asc
