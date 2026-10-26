@@ -1,54 +1,124 @@
+
 name: Build and release FastAPI
+
 on:
   push:
     branches: [main]
-    paths: ["app/**", ".github/workflows/application.yml"]
+    paths:
+      - "app/**"
+      - ".github/workflows/application.yml"
+
   workflow_dispatch:
     inputs:
       deploy:
-        description: "Deploy after image build? (select false until Terraform creates the Container App)"
+        description: "Deploy after image build? (false until Container App exists)"
         type: boolean
         default: false
+
 permissions:
   contents: read
   id-token: write
+
 concurrency:
   group: app-dev
   cancel-in-progress: false
+
 jobs:
   build_release:
     runs-on: ubuntu-latest
     environment: dev
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # 1. Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Setup Python
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: app/requirements-dev.txt
-      - name: Tests
+
+      # 3. Run FastAPI tests
+      - name: Run tests
         run: |
-          pip install -r app/requirements-dev.txt
-          cd app && pytest -q
-      - uses: azure/login@v2
+          python -m pip install -r app/requirements-dev.txt
+          cd app
+          python -m pytest -q
+
+      # 4. Authenticate GitHub Actions to Azure
+      - name: Azure Login
         if: vars.FOUNDATION_READY == 'true'
+        uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Build in ACR
+
+      # 5. Login to Azure Container Registry
+      - name: Login to ACR
         if: vars.FOUNDATION_READY == 'true'
         env:
-          REGISTRY: ${{ vars.ACR_NAME }}
-        run: az acr build --registry "$REGISTRY" --image "climate-api:${GITHUB_SHA}" ./app
-      - name: Update Container App (if enabled)
-        if: ${{ vars.FOUNDATION_READY == 'true' && ((github.event_name == 'push' && vars.ENABLE_APP == 'true') || (github.event_name == 'workflow_dispatch' && inputs.deploy)) }}
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          az acr login --name "$ACR_NAME"
+
+      # 6. Build Docker image on GitHub runner
+      - name: Build Docker image
+        if: vars.FOUNDATION_READY == 'true'
         env:
-          IMAGE_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+        run: |
+          IMAGE="${ACR_LOGIN_SERVER}/climate-api:${GITHUB_SHA}"
+
+          echo "Building image: $IMAGE"
+
+          docker build \
+            --platform linux/amd64 \
+            --tag "$IMAGE" \
+            ./app
+
+      # 7. Push Docker image to Azure Container Registry
+      - name: Push Docker image to ACR
+        if: vars.FOUNDATION_READY == 'true'
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+        run: |
+          IMAGE="${ACR_LOGIN_SERVER}/climate-api:${GITHUB_SHA}"
+
+          docker push "$IMAGE"
+
+          echo "Successfully pushed: $IMAGE"
+
+      # 8. Update Azure Container App
+      # Only runs after Container App has been created
+      - name: Update Container App
+        if: >-
+          ${{
+            vars.FOUNDATION_READY == 'true' &&
+            vars.ENABLE_APP == 'true' &&
+            (
+              github.event_name == 'push' ||
+              (
+                github.event_name == 'workflow_dispatch' &&
+                inputs.deploy == true
+              )
+            )
+          }}
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
           APP_RG: ${{ vars.APP_RESOURCE_GROUP }}
           APP_NAME: ${{ vars.APP_CONTAINER_NAME }}
         run: |
+          IMAGE="${ACR_LOGIN_SERVER}/climate-api:${GITHUB_SHA}"
+
+          echo "Deploying image: $IMAGE"
+
           az containerapp update \
             --resource-group "$APP_RG" \
             --name "$APP_NAME" \
-            --image "${IMAGE_SERVER}/climate-api:${GITHUB_SHA}"
+            --image "$IMAGE"
+
+          echo "Container App deployment completed"
