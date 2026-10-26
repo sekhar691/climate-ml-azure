@@ -4,7 +4,7 @@ resource "azurerm_application_insights_workbook" "predictions" {
   resource_group_name = azurerm_resource_group.app.name
   location = azurerm_resource_group.app.location
   display_name = "Climate ML Predictions"
-  source_id = azurerm_log_analytics_workspace.logs.id
+  source_id = lower(azurerm_log_analytics_workspace.logs.id)
   category = "workbook"
   data_json = jsonencode({
     version = "Notebook/1.0"
