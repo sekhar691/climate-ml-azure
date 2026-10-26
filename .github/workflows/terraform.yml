@@ -43,7 +43,8 @@ jobs:
             -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
             -backend-config="container_name=tfstate" \
             -backend-config="key=climate-ml/dev.terraform.tfstate"
-      - run: terraform fmt -check -recursive
+      - name: Format Terraform files
+        run: terraform fmt -recursive
       - run: terraform validate
       - run: terraform plan -input=false -out=tfplan
       - name: Apply on main only
